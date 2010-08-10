@@ -1,0 +1,190 @@
+<?php
+// $Id$
+
+// Maximum number of processed entries in one cron run.
+define('GOOGLE_RANKINGS_MAX_ROWS', 10000);
+
+// Default number of items in toplists.
+define('GOOGLE_RANKINGS_TOPLISTS_LIMIT_DEFAULT', 25);
+
+/**
+ * Implementation of hook_cron().
+ */
+function google_rankings_cron() {
+  $rx_search  = '#^http(?:s|)://(?:www|)\.(?P<google_domain>google\.[^/]+)/search?.+$#';
+  $rx_url     = '#^http(?:s|)://(?:www|)\.(?P<google_domain>google\.[^/]+)/url?.+$#';
+
+  $last_aid = variable_get('google_rankings_last_aid', 0);
+  $results = db_query("SELECT aid, sid, title, path, url, hostname, uid, timestamp FROM {accesslog} WHERE aid > %d", $last_aid);
+  while ($r = db_fetch_object($results)) {
+    if (++$counter > GOOGLE_RANKINGS_MAX_ROWS) break;
+    $last_aid = $r->aid;
+
+    // precess "google.com/search?..." referers
+    if (preg_match($rx_search, $r->url, $m)) {
+      $google_domain = $m['google_domain'];
+      $params = _query_parse(_url_parse($r->url, PHP_URL_QUERY));
+      $query = isset($params['q']) ? urldecode($params['q']) : NULL;
+      $page = isset($params['start']) ? (1 + (int) $params['start'] / 10) : 1;
+      $position = NULL;
+    }
+    // precess "google.com/url?..." referers
+    elseif (preg_match($rx_url, $r->url, $m)) {
+      $google_domain = $m['google_domain'];
+      $params = _query_parse(_url_parse($r->url, PHP_URL_QUERY));
+      $query = isset($params['q']) ? urldecode($params['q']) : NULL;
+      $page = NULL;
+      $position = isset($params['cd']) ? $params['cd'] : NULL;
+    }
+    else {
+      continue;
+    }
+
+    db_query("
+      INSERT INTO {google_rankings}
+        (google_domain, query, page, position, sid, title, path, hostname, uid, timestamp)
+        VALUES ('%s', '%s', %s, %s, '%s', '%s', '%s', '%s', %d, %d)",
+      $google_domain,
+      $query,
+      ($page === NULL ? 'NULL' : (int) $page),
+      ($position === NULL ? 'NULL' : (int) $position),
+      $r->sid,
+      $r->title,
+      $r->path,
+      $r->hostname,
+      $r->uid,
+      $r->timestamp
+    );
+  }
+  variable_set('google_rankings_last_aid', $last_aid);
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function google_rankings_menu() {
+  $items = array();
+  $items['admin/reports/google-rankings'] = array(
+    'type' => MENU_NORMAL_ITEM,
+    'title' => 'Google rankings',
+    'description' => 'View statistics about search queries and results page positions on Google.',
+    'page callback' => 'google_rankings_overview_page',
+    'access arguments' => array('access site reports'),
+    'file' => 'google_rankings.pages.inc'
+  );
+  $items['admin/reports/google-rankings/overview'] = array(
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'title' => 'Overview',
+    'weight' => 0,
+  );
+  $items['admin/reports/google-rankings/clicks'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'title' => 'Clicks',
+    'description' => 'Individual clicks from Google SERP\'s',
+    'weight' => 1,
+    'page callback' => 'google_rankings_clicks_page',
+    'access arguments' => array('access site reports'),
+    'file' => 'google_rankings.pages.inc'
+  );
+  $items['admin/settings/google-rankings'] = array(
+    'type' => MENU_NORMAL_ITEM,
+    'title' => 'Google rankings',
+    'description' => 'Google rankings reports settings.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('google_rankings_settings'),
+    'access arguments' => array('access site reports'),
+    'file' => 'google_rankings.admin.inc'
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function google_rankings_theme() {
+  $hooks['google_rankings_month_overview'] = array(
+    'template' => 'google-rankings-month-overview',
+    'arguments' => array('months' => '', 'days' => '', 'domains' => '', 'top_queries' => '', 'top_words' => '', 'top_pages' => ''),
+  );
+  $hooks['google_rankings_day_overview'] = array(
+    'template' => 'google-rankings-day-overview',
+    'arguments' => array('months' => '', 'days' => '', 'domains' => '', 'top_queries' => '', 'top_words' => '', 'top_pages' => ''),
+  );
+
+  return $hooks;
+}
+
+/**
+ * Helper function, a more robust parse_url() implementation.
+ */
+function _url_parse($url, $component = NULL) {
+  $full_rx = '!^
+    (?P<scheme>[a-z][a-z0-9\+\-\.]*):/+         # scheme
+    (?:(?P<user>[^:@]*)(?::(?P<pass>[^@]*))?@)? # user and password
+    (?P<host>[^/\?\#:]*)                        # host
+    (?::(?P<port>[0-9]+))?                      # port
+    (?P<path>[^\?\#]*)                          # path
+    (?:\?(?P<query>[^\#]*))?                    # query
+    (?:\#(?P<fragment>.*))?                     # fragment
+  $!ix';
+
+  $path_rx = '!^
+    (?P<path>[^\?\#]*)                          # path
+    (?:\?(?P<query>[^\#]*))?                    # query
+    (?:\#(?P<fragment>.*))?                     # fragment
+  $!ix';
+
+  if (!preg_match($full_rx, $url, $m)) {
+    preg_match($path_rx, $url, $m);
+  }
+
+  $return = array(
+    'scheme'    => isset($m['scheme'])    ? $m['scheme']    : '',
+    'user'      => isset($m['user'])      ? $m['user']      : '',
+    'pass'      => isset($m['pass'])      ? $m['pass']      : '',
+    'host'      => isset($m['host'])      ? $m['host']      : '',
+    'port'      => isset($m['port'])      ? $m['port']      : '',
+    'path'      => isset($m['path'])      ? $m['path']      : '',
+    'query'     => isset($m['query'])     ? $m['query']     : '',
+    'fragment'  => isset($m['fragment'])  ? $m['fragment']  : '',
+  );
+
+  if ($component === NULL) {
+    return $return;
+  }
+  else {
+    switch ($component) {
+      case PHP_URL_SCHEME:
+        return $return['scheme'];
+      case PHP_URL_HOST:
+        return $return['host'];
+      case PHP_URL_PORT:
+        return $return['port'];
+      case PHP_URL_USER:
+        return $return['user'];
+      case PHP_URL_PASS:
+        return $return['pass'];
+      case PHP_URL_PATH:
+        return $return['path'];
+      case PHP_URL_QUERY:
+        return $return['query'];
+      case PHP_URL_FRAGMENT:
+        return $return['fragment'];
+      default:
+        return $return;
+    }
+  }
+}
+
+/**
+ * Helper function, parses url query parameter.
+ */
+function _query_parse($query) {
+  $params = array();
+  foreach (explode('&', $query) as $part) {
+    list ($key, $value) = explode('=', $part);
+    $params[$key] = $value;
+  }
+  return $params;
+}
+

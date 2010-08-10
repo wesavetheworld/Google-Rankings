@@ -1,0 +1,25 @@
+/* $Id$ */
+.google-ranking {
+  font-weight: bold;
+  padding-right: 25px;
+  text-align: right;
+  width: 80px;
+}
+
+.top-queries {
+  float: left;
+  margin-right: 0.5%;
+  width: 50%;
+}
+
+.top-words {
+  float: left;
+  margin-right: 0.5%;
+  width: 24.5%;
+}
+
+.top-pages {
+  float: left;
+  width: 24.5%;
+}
+

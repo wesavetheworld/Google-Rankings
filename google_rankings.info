@@ -1,0 +1,6 @@
+; $Id$
+name = Google Rankings
+description = Provides a report page with Google rankings.
+core = 6.x
+dependencies[] = statistics
+

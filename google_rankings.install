@@ -1,0 +1,147 @@
+<?php
+// $Id$
+/**
+ * @file
+ */
+
+/**
+ * Implementation of hook_requirements().
+ */
+function google_rankings_requirements($phase) {
+  $requirements = array();
+  $t = get_t();
+  switch ($phase) {
+    case 'install' :
+      break;
+    case 'runtime' :
+      $accesslog_flush_timer = variable_get('statistics_flush_accesslog_timer', 259200);
+      if (!variable_get('statistics_enable_access_log', 0)) {
+        $requirements['google_rankings'] = array(
+          'title' => $t("Google rankings"),
+          'description' => $t("Statistics module is enabled, but access log is disabled. Please enabled it on the !access_log_settings page.",
+            array('!access_log_settings' => l('access log settings', 'admin/reports/settings', array('query' => drupal_get_destination())))),
+          'severity' => REQUIREMENT_ERROR,
+          'value' => $t('Access log is disabled.'),
+        );
+      }
+      elseif ($accesslog_flush_timer != 0 && $accesslog_flush_timer < (time() - variable_get('cron_last', 0))) {
+        $requirements['google_rankings'] = array(
+          'title' => $t("Google rankings"),
+          'description' => $t("Access log is discarded faster then cron runs. Please <em>increase access log discard period</em> on the !access_log_settings page or run cron more often.",
+            array('!access_log_settings' => l('access log settings', 'admin/reports/settings', array('query' => drupal_get_destination())))),
+          'severity' => REQUIREMENT_ERROR,
+          'value' => $t('Access log is discarded too fast.'),
+        );
+      }
+      else {
+        $requirements['google_rankings'] = array(
+          'title' => $t('Google rankings'),
+          'severity' => REQUIREMENT_OK,
+          'value' => $t('Access log is enabled correctly.'),
+        );
+      }
+      break;
+  }
+  return $requirements;
+}
+
+/**
+ * Implementation of hook_install().
+ */
+function google_rankings_install() {
+  drupal_install_schema('google_rankings');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function google_rankings_uninstall() {
+  drupal_uninstall_schema('google_rankings');
+  variable_del('google_rankings_last_aid');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function google_rankings_schema() {
+  $schema['google_rankings'] = array(
+    'description' => 'Stores visitor hits clicked through from Google.',
+    'fields' => array(
+      'rid'  => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique path redirect ID.',
+      ),
+      'google_domain' => array(
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'description' => 'Referring google host, like google.com, google.co.uk, etc...',
+      ),
+      'query' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'The search query, typed in into Google.',
+      ),
+      'page' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'description' => 'SERP page number.',
+      ),
+      'position' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'description' => 'SERP lising number.',
+      ),
+      'sid' => array(
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+        'description' => 'Drupal session ID.',
+      ),
+      'title' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Page title.',
+      ),
+      'path' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Page path.',
+      ),
+      'hostname' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'description' => 'Visitor hostname or remote address.',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Drupal user ID.',
+      ),
+      'timestamp' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Timestamp of when the page was visited.',
+      ),
+    ),
+    'primary key' => array('rid'),
+    'indexes' => array(
+      'google_domain' => array('google_domain'),
+      'query' => array('query'),
+      'googlerankings_timestamp' => array('timestamp'),
+    ),
+  );
+
+  return $schema;
+}
+
